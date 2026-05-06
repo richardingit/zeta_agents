@@ -14,12 +14,13 @@ Supervisor Orchestrator - 主管 agent 调度子 agent。
     5. 循环直到 Supervisor 输出 FINAL_ANSWER 或达到 max_rounds
 """
 from __future__ import annotations
+from collections.abc import AsyncIterator
 import re
 
 from agent_sdk.core.context import Context
 from agent_sdk.core.types import AgentOutput
 from agent_sdk.runtime.builder import AgentBundle
-from agent_sdk.orchestrators.base import Orchestrator, OrchestratorOutput
+from agent_sdk.orchestrators.base import Orchestrator, OrchestratorOutput, OrchestratorStreamEvent
 
 
 # Supervisor 用的特殊"终止"标记,在 prompt 里告诉它怎么写
@@ -146,6 +147,93 @@ class SupervisorOrchestrator(Orchestrator):
         )
         await self._emit_completed(ctx, {"rounds": round_num, "sequence": sequence})
         return result
+
+    async def run_stream(self, ctx: Context) -> AsyncIterator[OrchestratorStreamEvent]:
+        await self._emit_started(ctx, {
+            "supervisor": self.supervisor.agent.name,
+            "workers": list(self.workers.keys()),
+        })
+        yield OrchestratorStreamEvent(type="start", orchestrator_type="supervisor", content=ctx.user_input)
+
+        agent_outputs: list[AgentOutput] = []
+        sequence: list[str] = []
+        worker_results: dict[str, str] = {}
+        final_content = ""
+        round_num = 0
+        current_request = ctx.user_input
+
+        while round_num < self.max_rounds:
+            round_num += 1
+            sequence.append(self.supervisor.agent.name)
+            sup_ctx = self._build_sub_ctx(ctx, self.supervisor)
+            sup_ctx.user_input = self._build_supervisor_prompt(current_request, worker_results)
+            sup_output, sup_events = await self._stream_agent_bundle(self.supervisor, sup_ctx)
+            for event in sup_events:
+                event.orchestrator_type = "supervisor"
+                yield event
+            agent_outputs.append(sup_output)
+
+            decision = self._parse_decision(sup_output.content)
+            if decision["type"] == "final":
+                final_content = decision["content"]
+                break
+            elif decision["type"] == "delegate":
+                worker_name = decision["worker"]
+                task = decision["task"]
+                if worker_name not in self.workers:
+                    worker_results[f"_error_round{round_num}"] = (
+                        f"No such worker '{worker_name}'. Available: {list(self.workers.keys())}"
+                    )
+                    continue
+                await self._emit_handoff(
+                    ctx,
+                    from_agent=self.supervisor.agent.name,
+                    to_agent=worker_name,
+                    reason=f"delegated: {task[:50]}",
+                )
+                yield OrchestratorStreamEvent(
+                    type="handoff",
+                    orchestrator_type="supervisor",
+                    from_agent=self.supervisor.agent.name,
+                    to_agent=worker_name,
+                    reason=task,
+                )
+                sequence.append(worker_name)
+                worker_bundle = self.workers[worker_name]
+                w_ctx = self._build_sub_ctx(ctx, worker_bundle)
+                w_ctx.user_input = task
+                w_output, w_events = await self._stream_agent_bundle(worker_bundle, w_ctx)
+                for event in w_events:
+                    event.orchestrator_type = "supervisor"
+                    yield event
+                agent_outputs.append(w_output)
+                worker_results[f"{worker_name}_round{round_num}"] = w_output.content
+                if ctx.memory:
+                    await ctx.memory.remember(
+                        f"[{worker_name}] {w_output.content}",
+                        metadata={"agent": worker_name, "round": round_num},
+                    )
+            else:
+                final_content = sup_output.content
+                break
+
+        if not final_content and worker_results:
+            final_content = list(worker_results.values())[-1]
+
+        result = OrchestratorOutput(
+            orchestrator_type="supervisor",
+            final_content=final_content,
+            agent_outputs=agent_outputs,
+            sequence=sequence,
+            metadata={"rounds": round_num},
+        )
+        await self._emit_completed(ctx, {"rounds": round_num, "sequence": sequence})
+        yield OrchestratorStreamEvent(
+            type="done",
+            orchestrator_type="supervisor",
+            content=result.final_content,
+            output=result,
+        )
 
     def _build_supervisor_prompt(
         self, original_request: str, worker_results: dict[str, str]

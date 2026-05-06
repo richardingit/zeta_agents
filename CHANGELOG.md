@@ -9,6 +9,8 @@
 - Added streaming support in `OpenAICompatibleProvider` with native or fallback paths
 - Added `Agent.run_stream()` and `AgentBundle.run_stream()` for runtime-level streaming consumption
 - Added `llm.stream.started`, `llm.stream.delta`, and `llm.stream.completed` event bus events
+- Added `Orchestrator.run_stream()` plus streaming support for pipeline, supervisor, handoff, and parallel orchestrators
+- Added `OrchestratorStreamEvent` for real-time multi-agent workflow consumption
 - Added `OpenAICompatibleProvider` for OpenAI-style cloud or local gateways
 - Added `LLMConfig`, `create_llm()`, and `create_llm_from_config()` for config-driven provider creation
 - Added `AgentBuilder.with_llm_config()` for builder-level provider injection

@@ -7,12 +7,13 @@ Pipeline Orchestrator - 流水线串行执行。
 - 例:researcher → writer → reviewer
 """
 from __future__ import annotations
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from agent_sdk.core.context import Context
 from agent_sdk.core.types import AgentOutput
 from agent_sdk.runtime.builder import AgentBundle
-from agent_sdk.orchestrators.base import Orchestrator, OrchestratorOutput
+from agent_sdk.orchestrators.base import Orchestrator, OrchestratorOutput, OrchestratorStreamEvent
 
 
 @dataclass
@@ -93,3 +94,57 @@ class PipelineOrchestrator(Orchestrator):
         )
         await self._emit_completed(ctx, {"sequence": sequence})
         return result
+
+    async def run_stream(self, ctx: Context) -> AsyncIterator[OrchestratorStreamEvent]:
+        await self._emit_started(ctx, {"stage_count": len(self.stages)})
+        yield OrchestratorStreamEvent(type="start", orchestrator_type="pipeline", content=ctx.user_input)
+
+        agent_outputs: list[AgentOutput] = []
+        sequence: list[str] = []
+        previous_output = ctx.user_input
+
+        for i, stage in enumerate(self.stages):
+            agent_name = stage.bundle.agent.name
+            sequence.append(agent_name)
+            current_input = stage.input_template.format(
+                previous_output=previous_output,
+                user_input=ctx.user_input,
+                **ctx.state,
+            )
+            stage_ctx = self._build_sub_ctx(ctx, stage.bundle)
+            stage_ctx.user_input = current_input
+
+            output, events = await self._stream_agent_bundle(stage.bundle, stage_ctx)
+            for event in events:
+                event.orchestrator_type = "pipeline"
+                yield event
+            agent_outputs.append(output)
+
+            if stage.save_to_state:
+                ctx.state[stage.save_to_state] = output.content
+            previous_output = output.content
+
+            if i + 1 < len(self.stages):
+                next_agent = self.stages[i + 1].bundle.agent.name
+                await self._emit_handoff(ctx, from_agent=agent_name, to_agent=next_agent, reason="pipeline_next_stage")
+                yield OrchestratorStreamEvent(
+                    type="handoff",
+                    orchestrator_type="pipeline",
+                    from_agent=agent_name,
+                    to_agent=next_agent,
+                    reason="pipeline_next_stage",
+                )
+
+        result = OrchestratorOutput(
+            orchestrator_type="pipeline",
+            final_content=previous_output,
+            agent_outputs=agent_outputs,
+            sequence=sequence,
+        )
+        await self._emit_completed(ctx, {"sequence": sequence})
+        yield OrchestratorStreamEvent(
+            type="done",
+            orchestrator_type="pipeline",
+            content=result.final_content,
+            output=result,
+        )

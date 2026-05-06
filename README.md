@@ -143,6 +143,16 @@ async for event in agent.run_stream("Say hello"):
         print(event.content, end="")
 ```
 
+Orchestrators also support streaming:
+
+```python
+from agent_sdk.core import Context
+
+async for event in pipeline.run_stream(Context(user_input="Analyze this task")):
+    if event.type == "agent_chunk" and event.agent_event and event.agent_event.type == "text":
+        print(f"[{event.agent_name}] {event.agent_event.content}", end="")
+```
+
 ## Core Concepts
 
 ### AgentBuilder

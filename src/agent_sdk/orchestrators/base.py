@@ -9,11 +9,11 @@ Orchestrator 模块 - 多 agent 协作编排。
 """
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-import time
 
 from agent_sdk.core.context import Context
-from agent_sdk.core.types import AgentOutput
+from agent_sdk.core.types import AgentOutput, AgentStreamEvent
 from agent_sdk.core.event_bus import EventType
 
 
@@ -27,12 +27,34 @@ class OrchestratorOutput:
     metadata: dict = field(default_factory=dict)
 
 
+@dataclass
+class OrchestratorStreamEvent:
+    type: str  # start / agent_chunk / handoff / done
+    orchestrator_type: str
+    agent_name: str = ""
+    content: str = ""
+    agent_event: AgentStreamEvent | None = None
+    from_agent: str = ""
+    to_agent: str = ""
+    reason: str = ""
+    output: OrchestratorOutput | None = None
+
+
 class Orchestrator(ABC):
     """编排基类"""
 
     @abstractmethod
     async def run(self, ctx: Context) -> OrchestratorOutput:
         ...
+
+    async def run_stream(self, ctx: Context) -> AsyncIterator[OrchestratorStreamEvent]:
+        output = await self.run(ctx)
+        yield OrchestratorStreamEvent(
+            type="done",
+            orchestrator_type=type(self).__name__,
+            content=output.final_content,
+            output=output,
+        )
 
     async def _emit_started(self, ctx: Context, payload: dict | None = None):
         if ctx.event_bus:
@@ -61,6 +83,28 @@ class Orchestrator(ABC):
                 to_agent=to_agent,
                 reason=reason,
             )
+
+    @staticmethod
+    async def _stream_agent_bundle(
+        bundle,
+        ctx: Context,
+    ) -> tuple[AgentOutput, list[OrchestratorStreamEvent]]:
+        events: list[OrchestratorStreamEvent] = []
+        final_output: AgentOutput | None = None
+        async for agent_event in bundle.agent.run_stream(ctx):
+            events.append(
+                OrchestratorStreamEvent(
+                    type="agent_chunk",
+                    orchestrator_type="agent",
+                    agent_name=bundle.agent.name,
+                    content=agent_event.content,
+                    agent_event=agent_event,
+                )
+            )
+            if agent_event.type == "done" and agent_event.output is not None:
+                final_output = agent_event.output
+        assert final_output is not None, "Agent stream did not produce a final output"
+        return final_output, events
 
     @staticmethod
     def _build_sub_ctx(parent_ctx: Context, bundle) -> Context:
