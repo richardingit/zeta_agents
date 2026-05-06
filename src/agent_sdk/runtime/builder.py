@@ -9,13 +9,14 @@ AgentBuilder - 框架对外的核心 API。
 from __future__ import annotations
 from dataclasses import dataclass
 
-from ..core.agent import Agent, AgentConfig, SimpleAgent
-from ..core.context import Context
-from ..core.event_bus import EventBus
-from ..modules.llm.base import LLMModule
-from ..modules.memory.base import MemoryModule
-from ..modules.skills.base import SkillsModule
-from ..modules.tools.base import ToolsModule
+from agent_sdk.core.agent import Agent, AgentConfig, SimpleAgent
+from agent_sdk.core.context import Context
+from agent_sdk.core.event_bus import EventBus
+from agent_sdk.modules.llm.base import LLMConfig, LLMModule
+from agent_sdk.modules.llm.factory import create_llm_from_config
+from agent_sdk.modules.memory.base import MemoryModule
+from agent_sdk.modules.skills.base import SkillsModule
+from agent_sdk.modules.tools.base import ToolsModule
 
 
 @dataclass
@@ -68,6 +69,12 @@ class AgentBuilder:
         self._llm = llm
         if model:
             self._config.model = model
+        return self
+
+    def with_llm_config(self, config: LLMConfig, fn=None) -> "AgentBuilder":
+        self._llm = create_llm_from_config(config, fn=fn)
+        if config.model:
+            self._config.model = config.model
         return self
 
     def with_system_prompt(self, prompt: str) -> "AgentBuilder":

@@ -50,6 +50,60 @@ result = await agent.run("Say hello")
 print(result.content)
 ```
 
+## Flexible LLM Entry
+
+You can bring your own LLM backend through a unified interface.
+
+### 1. Function-based entry
+
+```python
+from agent_sdk import AgentBuilder
+from agent_sdk.llm import FunctionLLM
+
+async def my_llm(messages, tools=None, model=None, temperature=0.7, **kwargs):
+    return "Custom backend response"
+
+agent = (
+    AgentBuilder("assistant")
+    .with_llm(FunctionLLM(my_llm))
+    .build()
+)
+```
+
+### 2. OpenAI-compatible gateway
+
+```python
+from agent_sdk.llm import OpenAICompatibleProvider
+
+llm = OpenAICompatibleProvider(
+    model="gpt-4.1-mini",
+    api_key="YOUR_KEY",
+    base_url="https://api.openai.com/v1",
+)
+```
+
+This also works for local or self-hosted gateways such as vLLM if they expose an OpenAI-compatible API.
+
+### 3. Config-driven entry
+
+```python
+from agent_sdk import AgentBuilder
+from agent_sdk.llm import LLMConfig
+
+agent = (
+    AgentBuilder("assistant")
+    .with_llm_config(
+        LLMConfig(
+            provider="openai_compatible",
+            model="gpt-4.1-mini",
+            api_key="YOUR_KEY",
+            base_url="https://api.openai.com/v1",
+        )
+    )
+    .build()
+)
+```
+
 ## Core Concepts
 
 ### AgentBuilder

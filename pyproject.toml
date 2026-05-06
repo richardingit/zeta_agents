@@ -20,6 +20,9 @@ dev = [
   "pytest-asyncio>=0.23.0",
   "ruff>=0.6.0",
 ]
+litellm = [
+  "litellm>=1.63.0",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_sdk"]
@@ -27,4 +30,3 @@ packages = ["src/agent_sdk"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-
