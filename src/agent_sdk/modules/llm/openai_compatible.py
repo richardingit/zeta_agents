@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from typing import Any, Callable
 from urllib import error, request
 
 from agent_sdk.core.types import Role, ToolCall
-from agent_sdk.modules.llm.base import LLMConfig, LLMModule, LLMResponse
+from agent_sdk.modules.llm.base import LLMChunk, LLMConfig, LLMModule, LLMResponse
 
 
 Transport = Callable[[str, dict[str, str], dict[str, Any], float | None], dict[str, Any]]
+StreamTransport = Callable[[str, dict[str, str], dict[str, Any], float | None], list[dict[str, Any]] | AsyncIterator[dict[str, Any]]]
 
 
 def _default_transport(
@@ -42,6 +44,7 @@ class OpenAICompatibleProvider(LLMModule):
         timeout: float | None = 60.0,
         default_headers: dict[str, str] | None = None,
         transport: Transport | None = None,
+        stream_transport: StreamTransport | None = None,
     ):
         self.config = LLMConfig(
             provider="openai_compatible",
@@ -53,6 +56,7 @@ class OpenAICompatibleProvider(LLMModule):
             headers=default_headers or {},
         )
         self._transport = transport or _default_transport
+        self._stream_transport = stream_transport
 
     async def complete(
         self,
@@ -135,3 +139,119 @@ class OpenAICompatibleProvider(LLMModule):
             model=data.get("model", fallback_model),
             usage=data.get("usage", {}),
         )
+
+    async def stream(
+        self,
+        messages,
+        tools=None,
+        model=None,
+        temperature=0.7,
+        **kwargs,
+    ):
+        if self._stream_transport is None:
+            async for chunk in super().stream(
+                messages=messages,
+                tools=tools,
+                model=model,
+                temperature=temperature,
+                **kwargs,
+            ):
+                yield chunk
+            return
+
+        payload: dict[str, Any] = {
+            "model": model or self.config.model,
+            "messages": [
+                {
+                    "role": m.role.value if isinstance(m.role, Role) else str(m.role),
+                    "content": m.content,
+                }
+                for m in messages
+            ],
+            "temperature": temperature,
+            "stream": True,
+        }
+        max_tokens = kwargs.pop("max_tokens", self.config.max_tokens)
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        if tools:
+            payload["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters or {"type": "object", "properties": {}},
+                    },
+                }
+                for tool in tools
+            ]
+        payload.update(kwargs)
+
+        headers = {
+            "Content-Type": "application/json",
+            **self.config.headers,
+        }
+        if self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
+
+        stream = self._stream_transport(
+            f"{self.config.base_url}/chat/completions",
+            headers,
+            payload,
+            self.config.timeout,
+        )
+        if hasattr(stream, "__aiter__"):
+            async for event in stream:
+                for chunk in self._parse_stream_event(event, model or self.config.model or "openai-compatible"):
+                    yield chunk
+        else:
+            for event in stream:
+                for chunk in self._parse_stream_event(event, model or self.config.model or "openai-compatible"):
+                    yield chunk
+        yield LLMChunk(type="done", model=model or self.config.model or "openai-compatible")
+
+    @staticmethod
+    def _parse_stream_event(event: dict[str, Any], fallback_model: str) -> list[LLMChunk]:
+        chunks: list[LLMChunk] = []
+        for choice in event.get("choices", []) or []:
+            delta = choice.get("delta", {}) or {}
+            if delta.get("content"):
+                chunks.append(
+                    LLMChunk(
+                        type="text",
+                        content=delta["content"],
+                        model=event.get("model", fallback_model),
+                        raw=event,
+                    )
+                )
+            for raw_tc in delta.get("tool_calls", []) or []:
+                function = raw_tc.get("function", {})
+                arguments = function.get("arguments", {})
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments)
+                    except json.JSONDecodeError:
+                        arguments = {"raw": arguments}
+                chunks.append(
+                    LLMChunk(
+                        type="tool_call",
+                        tool_call=ToolCall(
+                            id=raw_tc.get("id", ""),
+                            name=function.get("name", ""),
+                            arguments=arguments,
+                        ),
+                        model=event.get("model", fallback_model),
+                        raw=event,
+                    )
+                )
+        if event.get("usage"):
+            chunks.append(
+                LLMChunk(
+                    type="usage",
+                    usage=event["usage"],
+                    model=event.get("model", fallback_model),
+                    raw=event,
+                )
+            )
+        return chunks

@@ -116,6 +116,25 @@ agent = (
 )
 ```
 
+### 4. Streaming entry
+
+`LLMModule` now supports both full completion and streaming.
+
+```python
+from agent_sdk.llm import FunctionLLM
+
+async def stream_llm(messages, **kwargs):
+    for token in ["Hello", " ", "world"]:
+        yield token
+
+llm = FunctionLLM(
+    fn=lambda **kwargs: "Hello world",
+    stream_fn=stream_llm,
+)
+```
+
+Providers that do not implement native streaming still expose `stream()` through a compatibility fallback built on top of `complete()`.
+
 ## Core Concepts
 
 ### AgentBuilder

@@ -4,6 +4,9 @@
 
 - Added flexible LLM entrypoints for bring-your-own model backends
 - Added `FunctionLLM` for wiring custom sync or async inference functions
+- Added streaming support with `LLMChunk` and `LLMModule.stream()`
+- Added `FunctionLLM.stream_fn` for custom token streaming
+- Added streaming support in `OpenAICompatibleProvider` with native or fallback paths
 - Added `OpenAICompatibleProvider` for OpenAI-style cloud or local gateways
 - Added `LLMConfig`, `create_llm()`, and `create_llm_from_config()` for config-driven provider creation
 - Added `AgentBuilder.with_llm_config()` for builder-level provider injection

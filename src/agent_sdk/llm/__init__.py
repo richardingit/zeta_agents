@@ -1,5 +1,6 @@
 from agent_sdk.modules.llm import (
     LLMConfig,
+    LLMChunk,
     LLMModule,
     LLMResponse,
     FunctionLLM,
@@ -12,6 +13,7 @@ from agent_sdk.modules.llm import (
 
 __all__ = [
     "LLMConfig",
+    "LLMChunk",
     "LLMModule",
     "LLMResponse",
     "FunctionLLM",

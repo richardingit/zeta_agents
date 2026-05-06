@@ -78,3 +78,46 @@ def test_builder_with_llm_config_creates_provider():
         .build()
     )
     assert isinstance(bundle.llm, OpenAICompatibleProvider)
+
+
+async def test_function_llm_supports_streaming():
+    async def complete(messages, **kwargs):
+        return "hello world"
+
+    async def stream(messages, **kwargs):
+        for token in ["hello", " ", "world"]:
+            yield token
+
+    llm = FunctionLLM(complete, stream_fn=stream)
+    chunks = [chunk async for chunk in llm.stream(messages=[])]
+
+    assert [chunk.content for chunk in chunks if chunk.type == "text"] == ["hello", " ", "world"]
+    assert chunks[-1].type == "done"
+
+
+async def test_openai_compatible_provider_supports_stream_transport():
+    def fake_stream_transport(url, headers, payload, timeout):
+        return [
+            {
+                "model": "demo-model",
+                "choices": [{"delta": {"content": "hello"}}],
+            },
+            {
+                "model": "demo-model",
+                "choices": [{"delta": {"content": " world"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 2},
+            },
+        ]
+
+    provider = OpenAICompatibleProvider(
+        model="demo-model",
+        api_key="secret",
+        base_url="http://localhost:8000/v1",
+        stream_transport=fake_stream_transport,
+    )
+    chunks = [chunk async for chunk in provider.stream(messages=[Message(role=Role.USER, content="hello")])]
+
+    assert [chunk.content for chunk in chunks if chunk.type == "text"] == ["hello", " world"]
+    usage_chunks = [chunk for chunk in chunks if chunk.type == "usage"]
+    assert usage_chunks[0].usage["completion_tokens"] == 2
+    assert chunks[-1].type == "done"

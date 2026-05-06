@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 import os
 from typing import Any
@@ -47,6 +48,16 @@ class LLMResponse:
     usage: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class LLMChunk:
+    type: str = "text"  # text / tool_call / done / usage
+    content: str = ""
+    tool_call: ToolCall | None = None
+    usage: dict[str, Any] | None = None
+    model: str | None = None
+    raw: dict[str, Any] | None = None
+
+
 class LLMModule(ABC):
     @abstractmethod
     async def complete(
@@ -58,3 +69,26 @@ class LLMModule(ABC):
         **kwargs,
     ) -> LLMResponse:
         ...
+
+    async def stream(
+        self,
+        messages: list[Message],
+        tools: list[Tool] | None = None,
+        model: str | None = None,
+        temperature: float = 0.7,
+        **kwargs,
+    ) -> AsyncIterator[LLMChunk]:
+        response = await self.complete(
+            messages=messages,
+            tools=tools,
+            model=model,
+            temperature=temperature,
+            **kwargs,
+        )
+        if response.content:
+            yield LLMChunk(type="text", content=response.content, model=response.model)
+        for tool_call in response.tool_calls:
+            yield LLMChunk(type="tool_call", tool_call=tool_call, model=response.model)
+        if response.usage:
+            yield LLMChunk(type="usage", usage=response.usage, model=response.model)
+        yield LLMChunk(type="done", model=response.model)
