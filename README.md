@@ -2,6 +2,17 @@
 
 A modular multi-agent Python SDK with pluggable memory, skills, tools, and orchestrators.
 
+## What's New
+
+### 0.1.1
+
+- Added flexible LLM entrypoints so the SDK is not tied to a single provider stack
+- Added `FunctionLLM` for plugging in custom inference functions directly
+- Added `OpenAICompatibleProvider` for OpenAI-style hosted or local gateways
+- Added `LLMConfig`, `create_llm()`, and `AgentBuilder.with_llm_config()`
+- Added optional `LiteLLMProvider` adapter support
+- Added tests for the new LLM entry layer
+
 ## Status
 
 This repository is being converted from a framework prototype into an installable SDK.
@@ -12,6 +23,7 @@ Current stable focus for `0.1.x`:
 - orchestrators
 - basic memory / skills / tools modules
 - visualization
+- flexible llm entrypoints
 
 ## Installation
 
