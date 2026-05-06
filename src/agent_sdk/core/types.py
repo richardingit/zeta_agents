@@ -61,3 +61,13 @@ class AgentOutput:
     tool_calls_made: list[ToolCall] = field(default_factory=list)
     iterations: int = 0
 
+
+@dataclass
+class AgentStreamEvent:
+    type: str  # text / tool_call / tool_result / done
+    agent_name: str
+    content: str = ""
+    tool_call: ToolCall | None = None
+    tool_result: str | None = None
+    iteration: int = 0
+    output: AgentOutput | None = None

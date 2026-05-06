@@ -135,6 +135,14 @@ llm = FunctionLLM(
 
 Providers that do not implement native streaming still expose `stream()` through a compatibility fallback built on top of `complete()`.
 
+At the agent layer, you can also stream runtime events:
+
+```python
+async for event in agent.run_stream("Say hello"):
+    if event.type == "text":
+        print(event.content, end="")
+```
+
 ## Core Concepts
 
 ### AgentBuilder

@@ -1,10 +1,11 @@
 """Agent 基类 - 框架最核心的抽象"""
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agent_sdk.core.types import Message, Role, ToolCall, AgentOutput
+from agent_sdk.core.types import AgentOutput, AgentStreamEvent, Message, Role, ToolCall
 from agent_sdk.core.event_bus import EventType
 
 if TYPE_CHECKING:
@@ -164,6 +165,174 @@ class Agent(ABC):
 
         except Exception as e:
             # emit: agent.failed
+            if ctx.event_bus:
+                await ctx.event_bus.emit_quick(
+                    EventType.AGENT_FAILED,
+                    session_id=ctx.session_id,
+                    agent_name=self.name,
+                    error=str(e),
+                )
+            raise
+
+    async def run_stream(self, ctx: "Context") -> AsyncIterator[AgentStreamEvent]:
+        """Streaming execution entrypoint for UI/event-driven consumption."""
+        if ctx.event_bus:
+            await ctx.event_bus.emit_quick(
+                EventType.AGENT_STARTED,
+                session_id=ctx.session_id,
+                agent_name=self.name,
+                user_input=ctx.user_input,
+            )
+
+        try:
+            await self._prepare(ctx)
+
+            iteration = 0
+            all_tool_calls: list[ToolCall] = []
+
+            while iteration < self.config.max_iterations:
+                iteration += 1
+                assert ctx.llm is not None, "LLM module is required"
+                tools = self._collect_tools(ctx)
+
+                if ctx.event_bus:
+                    await ctx.event_bus.emit_quick(
+                        EventType.LLM_STREAM_STARTED,
+                        session_id=ctx.session_id,
+                        agent_name=self.name,
+                        iteration=iteration,
+                    )
+
+                text_parts: list[str] = []
+                streamed_tool_calls: list[ToolCall] = []
+                final_usage: dict = {}
+                final_model: str | None = None
+
+                async for chunk in ctx.llm.stream(
+                    messages=ctx.messages,
+                    tools=tools,
+                    model=self.config.model,
+                    temperature=self.config.temperature,
+                ):
+                    final_model = chunk.model or final_model
+                    if chunk.type == "text" and chunk.content:
+                        text_parts.append(chunk.content)
+                        if ctx.event_bus:
+                            await ctx.event_bus.emit_quick(
+                                EventType.LLM_STREAM_DELTA,
+                                session_id=ctx.session_id,
+                                agent_name=self.name,
+                                iteration=iteration,
+                                delta=chunk.content,
+                                chunk_type=chunk.type,
+                            )
+                        yield AgentStreamEvent(
+                            type="text",
+                            agent_name=self.name,
+                            content=chunk.content,
+                            iteration=iteration,
+                        )
+                    elif chunk.type == "tool_call" and chunk.tool_call:
+                        streamed_tool_calls.append(chunk.tool_call)
+                        if ctx.event_bus:
+                            await ctx.event_bus.emit_quick(
+                                EventType.LLM_STREAM_DELTA,
+                                session_id=ctx.session_id,
+                                agent_name=self.name,
+                                iteration=iteration,
+                                chunk_type=chunk.type,
+                                tool_name=chunk.tool_call.name,
+                            )
+                        yield AgentStreamEvent(
+                            type="tool_call",
+                            agent_name=self.name,
+                            tool_call=chunk.tool_call,
+                            iteration=iteration,
+                        )
+                    elif chunk.type == "usage" and chunk.usage:
+                        final_usage = chunk.usage
+                    elif chunk.type == "done":
+                        if ctx.event_bus:
+                            await ctx.event_bus.emit_quick(
+                                EventType.LLM_STREAM_COMPLETED,
+                                session_id=ctx.session_id,
+                                agent_name=self.name,
+                                iteration=iteration,
+                                model=final_model,
+                                usage=final_usage,
+                                has_tool_calls=bool(streamed_tool_calls),
+                            )
+
+                assistant_msg = Message(
+                    role=Role.ASSISTANT,
+                    content="".join(text_parts),
+                    tool_calls=streamed_tool_calls,
+                )
+                ctx.add_message(assistant_msg)
+
+                if not streamed_tool_calls:
+                    break
+
+                for tc in streamed_tool_calls:
+                    all_tool_calls.append(tc)
+                    if ctx.event_bus:
+                        await ctx.event_bus.emit_quick(
+                            EventType.TOOL_CALL_STARTED,
+                            session_id=ctx.session_id,
+                            agent_name=self.name,
+                            tool_name=tc.name,
+                            arguments=tc.arguments,
+                        )
+                    tool_result = await self._execute_tool(ctx, tc)
+                    if ctx.event_bus:
+                        await ctx.event_bus.emit_quick(
+                            EventType.TOOL_CALL_COMPLETED,
+                            session_id=ctx.session_id,
+                            agent_name=self.name,
+                            tool_name=tc.name,
+                            result_preview=str(tool_result)[:200],
+                        )
+                    ctx.add_message(
+                        Message(
+                            role=Role.TOOL,
+                            content=str(tool_result),
+                            tool_call_id=tc.id,
+                            name=tc.name,
+                        )
+                    )
+                    yield AgentStreamEvent(
+                        type="tool_result",
+                        agent_name=self.name,
+                        tool_call=tc,
+                        tool_result=str(tool_result),
+                        iteration=iteration,
+                    )
+
+            await self._finalize(ctx)
+            final_content = ctx.messages[-1].content if ctx.messages else ""
+            output = AgentOutput(
+                agent_name=self.name,
+                content=final_content,
+                messages=ctx.messages,
+                tool_calls_made=all_tool_calls,
+                iterations=iteration,
+            )
+            if ctx.event_bus:
+                await ctx.event_bus.emit_quick(
+                    EventType.AGENT_COMPLETED,
+                    session_id=ctx.session_id,
+                    agent_name=self.name,
+                    iterations=iteration,
+                    tool_calls_count=len(all_tool_calls),
+                )
+            yield AgentStreamEvent(
+                type="done",
+                agent_name=self.name,
+                content=final_content,
+                iteration=iteration,
+                output=output,
+            )
+        except Exception as e:
             if ctx.event_bus:
                 await ctx.event_bus.emit_quick(
                     EventType.AGENT_FAILED,

@@ -24,6 +24,9 @@ class EventType:
 
     # LLM 调用
     LLM_CALL_STARTED = "llm.call.started"
+    LLM_STREAM_STARTED = "llm.stream.started"
+    LLM_STREAM_DELTA = "llm.stream.delta"
+    LLM_STREAM_COMPLETED = "llm.stream.completed"
     LLM_CALL_COMPLETED = "llm.call.completed"
     LLM_CALL_FAILED = "llm.call.failed"
 

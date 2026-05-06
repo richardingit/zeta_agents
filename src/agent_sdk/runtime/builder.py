@@ -41,6 +41,19 @@ class AgentBundle:
         )
         return await self.agent.run(ctx)
 
+    async def run_stream(self, user_input: str, **state):
+        ctx = Context(
+            user_input=user_input,
+            llm=self.llm,
+            memory=self.memory,
+            skills=self.skills,
+            tools=self.tools,
+            event_bus=self.event_bus,
+            state=state,
+        )
+        async for event in self.agent.run_stream(ctx):
+            yield event
+
 
 class AgentBuilder:
     """
