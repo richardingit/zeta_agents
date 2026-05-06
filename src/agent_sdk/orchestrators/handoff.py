@@ -52,9 +52,11 @@ class HandoffOrchestrator(Orchestrator):
         entry_agent: str,
         nodes: dict[str, HandoffNode],
         max_handoffs: int = 5,
+        name: str | None = None,
     ):
         if entry_agent not in nodes:
             raise ValueError(f"entry_agent '{entry_agent}' not in nodes")
+        super().__init__(name=name)
         self.entry_agent = entry_agent
         self.nodes = nodes
         self.max_handoffs = max_handoffs

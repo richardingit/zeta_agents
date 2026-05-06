@@ -41,7 +41,15 @@ class OrchestratorStreamEvent:
 
 
 class Orchestrator(ABC):
-    """编排基类"""
+    """编排基类。
+
+    所有子类应通过 ``super().__init__(name=name)`` 传入业务名;若未传则
+    fallback 到类名(如 ``PipelineOrchestrator``),保持向后兼容。``name`` 会
+    出现在嵌套 sequence、可视化标签里,推荐显式传业务相关的短名。
+    """
+
+    def __init__(self, name: str | None = None) -> None:
+        self.name: str = name or type(self).__name__
 
     @abstractmethod
     async def run(self, ctx: Context) -> OrchestratorOutput:

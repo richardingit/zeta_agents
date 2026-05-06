@@ -51,9 +51,11 @@ class SupervisorOrchestrator(Orchestrator):
         supervisor_bundle: AgentBundle,
         workers: dict[str, AgentBundle],
         max_rounds: int = 10,
+        name: str | None = None,
     ):
         if not workers:
             raise ValueError("Supervisor requires at least one worker")
+        super().__init__(name=name)
         self.supervisor = supervisor_bundle
         self.workers = workers
         self.max_rounds = max_rounds

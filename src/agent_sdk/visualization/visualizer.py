@@ -72,7 +72,8 @@ class OrchestratorVisualizer:
 
         previous = "start"
         for index, stage in enumerate(orchestrator.stages, start=1):
-            agent_name = stage.bundle.agent.name
+            # 节点名:对 BundleRunnable / OrchestratorRunnable 都通用
+            agent_name = stage.runnable.name
             node_id = f"stage_{index}_{agent_name}"
             label = f"{index}. {agent_name}"
             if stage.save_to_state:

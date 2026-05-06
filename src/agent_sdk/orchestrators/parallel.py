@@ -45,9 +45,11 @@ class ParallelOrchestrator(Orchestrator):
         self,
         agents: list[AgentBundle],
         aggregator: Aggregator | None = None,
+        name: str | None = None,
     ):
         if not agents:
             raise ValueError("Parallel requires at least one agent")
+        super().__init__(name=name)
         self.agents = agents
         self.aggregator = aggregator or default_aggregator
 
