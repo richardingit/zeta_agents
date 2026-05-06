@@ -184,6 +184,15 @@ source .venv/bin/activate
 python examples/single_agent.py
 ```
 
+For external scoped memory orchestration without using the SDK's built-in
+`use_memory=True` path, see:
+
+- [external_memory_stream_demo.py](/Users/chenyanfeng/Documents/GitHub/agent-projects/examples/external_memory_stream_demo.py)
+
+This pattern is useful when you want memory isolation by `user_id`, `model`,
+`agent_name`, or `project` before the SDK's internal memory layer grows
+multi-dimensional recall.
+
 ## Verify On Another Machine
 
 Once the repository is pushed to GitHub, you can validate it from another computer with:
